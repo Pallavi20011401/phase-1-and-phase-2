@@ -1,0 +1,185 @@
+ +----------------------------------+ | CS 140 | | PROJECT 1: THREADS | | DESIGN DOCUMENT | +---------------------------------+
+---- GROUP ----
+>> Fill in the names and email addresses of your group members.
+Param Patel <paramnar@buffalo.edu> 
+Pallavi Thupakula <pthupaku@buffalo.edu> 
+Ruchita Kota <rkota2@buffalo.edu>
+---- PRELIMINARIES ----
+>> If you have any preliminary comments on your submission, notes for the >> TAs, or extra credit, please give them here.
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course >> text, lecture notes, and course staff.
+ALARM CLOCK ===========
+---- DATA STRUCTURES ----
+>> A1: Copy here the declaration of each new or changed `struct' or >> `struct' member, global or static variable, `typedef', or
+>> enumeration. Identify the purpose of each in 25 words or less.
+In timer.h file:
+>>Introduced "lib/kernel/list.h" header file
+>>Added struct sleep_list_elem {
+struct list_elem list_el;
+struct semaphore* sem;
+   
+ struct thread* curr_thread; int64_t tick;
+};
+This would be used in timer.c file for scheduling threads using semaphores.
+In timer.c file:
+>>Added
+struct list sleep_queue;
+struct lock sleep_queue_lock;
+and initialized them in void timer_init (void) list_init(&sleep_queue); lock_init(&sleep_queue_lock);
+These structs are linked lists where the threads would queue in if they are sleeping and the CPU would be locked when they are sleeping and unlocked when they are in running state.
+>>Added static void thread_to_queue(); Static function which adds thread to queue.
+>>Made changes in the timer_sleep function
+Used semaphores and locks instead of the traditional thread_yield() function approach.
+>> In function in static void timer_interrupt(struct intr_frame *args UNUSED) Added wakeup_threads() function to wake threads up.
+>>Added wakeup_threads(); To wake threads up.
+---- ALGORITHMS ----
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+Initially, the function used thread_yield() function to handle the task.
+→thread_to_queue()(global lock)creates a semaphore, initializes a sleep_list_elem, and inserts it into the ordered sleep_queue.
+However, using our approach, where we use semaphores, and locks and condition variables. Using this approach we are able to minimize the time taken by the time_interrupt() function.
+>> A3: What steps are taken to minimize the amount of time spent in
+
+ >> the timer interrupt handler?
+Using semaphores, condition variables and a function called wakeup_threads() we were able to minimize the time spent in the timer interrupt handler.The sleep_queue is maintained in order of wake-up times.
+---- SYNCHRONIZATION ----
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously?
+By using condition variables, locks, and semaphores, we can avoid race conditions.Sleep_queue_lock: It ensures only one thread modifies sleep_queue at a time.It can then safely add itself to the queue without worrying about other threads trying to modify the queue at the same time.
+>> A5: How are race conditions avoided when a timer interrupt occurs >> during a call to timer_sleep()?
+By creating a void function (in our case wakeup_threads()) which utilizes semaphores and condition variables we are able to avoid race conditions.
+---- RATIONALE ----
+>> A6: Why did you choose this design? In what ways is it superior to >> another design you considered?
+There are two approaches to solve the race condition problem in this project. They are mutexes and semaphores. The reason for selecting semaphores over mutexes are as follows:
+1. More efficient as they don’t waste CPU cycles and resources.
+2. Easier to implement for waking and sleeping thread patterns.
+3. Semaphores ensure that threads are effectively sleeping or blocked so that no spinning
+occurs.
+PRIORITY SCHEDULING ===================
+---- DATA STRUCTURES ----
+>> B1: Copy here the declaration of each new or changed `struct' or >> `struct' member, global or static variable, `typedef', or
+>> enumeration. Identify the purpose of each in 25 words or less. For phase 2,
+In /home/pintos/src/threads/thread.c
+In void thread_set_priority(int new_priority)
+
+ our plan is to create a MultiLevel Feedback Queue Scheduler or MLFQS to influence the priority of the thread.
+In int thread_get_priority(void)
+Our aim is to compare priorities between two threads and it would return the thread with higher value.
+>> B2: Explain the data structure used to track priority donation.
+>> Use ASCII art to diagram a nested donation. (Alternately, submit a >> .png file.)
+A complex data structure thread which contains the priority, base_priority and list of donations in a struct data type and a struct lock which points to a void pointer which waits for a thread to wake up.
+CopyH (60) → [Lock A] → M (30→60) → [Lock B] → L (10→60)
+Explanation:
+H has priority 60 and wants Lock A
+M has base priority 30, holds Lock A, and wants Lock B L has base priority 10 and holds Lock B
+H's priority 60 is donated to M, then to L
+M and L now temporarily have priority 60
+This shows how high priority "flows" through locked threads, boosting their priority so they can finish faster.The key idea is to keep track of both original and donated priorities, updating them as locks are acquired and released. This helps solve the priority inversion problem.
+---- ALGORITHMS ----
+>> B3: How do you ensure that the highest priority thread waiting for >> a lock, semaphore, or condition variable wakes up first?
+By simple comparison operation in the int thread_get_priority() function.
+A possible way of doing this is by defining a function called max() which takes in two integer arguments and returns the highest integer value.
+In the next step, we will use this max() function to return the thread value with higher priority from either the donation_priority list or the priority list.
+>> B4: Describe the sequence of events when a call to lock_acquire()
+>> causes a priority donation. How is nested donation handled?
+The following sequence of events occurs when a call to lock_acquire() occurs: Let thread A have a priority greater than that of thread B.
+1. Thread A would request to acquire the lock that is currently placed on Thread B.
+2. Step 1 cannot progress as Thread B is placed under lock.
+3. Thread A donates its priority to Thread B.
+
+ 4. The priorities of both threads are updated.
+5. If there is a nested priority donation case then steps 1 through 4 would be repeated.
+6. Step 5 continues to thrive until the nested case is solved after which, the donation is
+reversed and the priorities return to their original threads.
+>> B5: Describe the sequence of events when lock_release() is called >> on a lock that a higher-priority thread is waiting for.
+The following procedure occurs:
+Let Thread A and B be two threads where A has higher priority than B.
+1. lock_release() function is called by thread B.
+2. The Priority Donation process is reversed.
+3. The waiting threads wake up by getting the highest priority.
+4. Context Switching happens if some other thread than the running thread has a higher
+priority.
+---- SYNCHRONIZATION ----
+>> B6: Describe a potential race in thread_set_priority() and explain
+>> How your implementation avoids it. Can you use a lock to avoid
+>> This race?
+Due to nested priority cases, the priority donation and reversal process becomes complex which leads to the state of the threads being inconsistent and they might end up getting the incorrect priority. This happens when thread A tries to donate its priority to thread B but thread B is also trying to exchange its priority with some other thread.
+To avoid this race condition, we plan on using semaphores.
+---- RATIONALE ----
+>> B7: Why did you choose this design? In what ways is it superior to
+>> another design you considered?
+Semaphores are superior to mutexes or interrupts due to the following reasons.
+1. Disabling interrupts causes increased latency in the system which leads to sluggish performance.
+2. Semaphores are built to handle complex race conditions whereas, mutexes can but would be difficult to implement due to their locking mechanisms.
+3. Semaphores are the most efficient in terms of performance.
+ADVANCED SCHEDULER ==================
+---- DATA STRUCTURES ----
+
+ >> C1: Copy here the declaration of each new or changed `struct' or >> `struct' member, global or static variable, `typedef', or
+>> enumeration. Identify the purpose of each in 25 words or less. Struct thread{
+int nice;
+fixed_point_t recent_cpu;
+}
+This structure helps in calculating the priority of the thread. Nice values are inversely proportional to priority values.
+● Ready queue list which maintains separate queues for each priority ready thread.
+● one variable for MLFQ calculations i.e., load_average
+● Helps in tracking as well as running the threads.
+---- ALGORITHMS ----
+>> C2: Suppose threads A, B, and C have nice values 0, 1, and 2. Each >> has a recent_cpu value of 0. Fill in the table below showing the
+>> scheduling decision and the priority and recent_cpu values for each >> thread after each given number of timer ticks:
+timer recent_cpu priority thread timer recent_cpu priority thread ticks A B C A B C torun ----- -- -- -- -- -- -- ------
+0 000636159A 4 400626159A 8 800616159A 12 1200606159B
+16 1240606059A 20 1640596059B 24 1680595959A 28 2080585959B 32 20 12 0 58 58 59 C 36 20 12 4 58 58 58 A
+>> C3: Did any ambiguities in the scheduler specification make values
+>> in the table uncertain? If so, what rule did you use to resolve
+>> them? Does this match the behavior of your scheduler?
+There might be some ambiguities in the scheduler specification make values in the table uncertain.
+1. The ambiguity of exact timing for priority calculation and the resolution for that is calculating priorities for every 4 ticks but this affects table when priority changes are reflected.
+
+ 2. The ambiguity of recent_cpu updates and resolution for it is incrementing recent_cpu by 1 for the running thread every tick.This tells how quickly the value of recent_cpu changes.
+3. the ambiguity if they have equal priorities and the solution for this is to have of round robin among threads for equal priority. This round-robin will determine which threads run when priorities are equal.
+The resolutions are tho ones I want to implement in my project and it will match the behavior of my scheduler.The values might change in my scheduler but the priority of A gradually decreasing allowing B and C to run will happen in my code too.
+>> C4: How is the way you divided the cost of scheduling between code
+>> inside and outside interrupt context likely to affect performance?
+In my way of approach for this project, I divided as inside interrupt context and outside interrupt context.
+This division might affect in the following ways:
+→By doing a fixed amount of work in each interrupt the system’s timing will be more predictable which can be crucial for certain applications.
+→By moving some scheduling work outside the interrupt context, we can utilize CPU idle time for these calculations, potentially improving overall system efficiency.
+→By minimizing the work done in the interrupt handler, we reduce the time interrupts are disabled. This improves system responsiveness to other interrupts.
+---- RATIONALE ----
+>> C5: Briefly critique your design, pointing out advantages and
+>> disadvantages in your design choices. If you were to have extra >> time to work on this part of the project, how might you choose to >> refine or improve your design?
+Advantages:
+1. Overall better system efficiency by minimizing delays caused due to interrupts by dividing tasks between interrupts and non-interrupt contexts.
+2. MLFQS scheduler is a fair scheduling algorithm that ensures all threads get to access the CPU resources.
+3. Better adaptability and flexibility due to dynamic adjustment of thread priorities.
+Disadvantages:
+1. Difficult to build, debug and code as MLFQS are more complex scheduling algorithm
+2. Recalculating thread priorities will lead to computational overhead.
+3. Difficult to predict, especially in real-world and real-time scenarios.
+
+ Improvements if I had more time:
+1. By introducing an adaptive strategy for timer tick function where it would use less resources when the thread is idle.
+2. By Introducing a Priority Aging function to avoid unnecessary thread starvation. 3. By introducing Group scheduling algorithms to pair similar threads together.
+>> C6: The assignment explains arithmetic for fixed-point math in >> detail, but it leaves it open to you to implement it. Why did you >> decide to implement it the way you did? If you created an
+>> abstraction layer for fixed-point math, that is, an abstract data
+>> type and/or a set of functions or macros to manipulate fixed-point >> numbers, why did you do so? If not, why not?
+I have used fixed-point arithmetic in my project. I decided to create an abstraction layer for fixed-point math using a combination of typedef, macros, and inline functions. Here's why we made this choice:
+1. Abstraction makes the code cleaner and easier to debug.
+2. Easier to read for other programmers
+Implementation details:
+Fixed-point arithmetic implementation for type safety. Without the abstraction, the following cases would occur:
+1. Sluggish performance.
+2. Difficulty reading the code.
+3. Difficulty in debugging the code.
+4. Introduction of code smells which leads to bad efficiency for system resources.
+SURVEY QUESTIONS ================
+Answering these questions is optional, but it will help us improve the course in future quarters. Feel free to tell us anything you
+want--these questions are just to spur your thoughts. You may also choose to respond anonymously in the course evaluations at the end of the quarter.
+>> In your opinion, was this assignment, or any one of the three problems >> in it, too easy or too hard? Did it take too long or too little time?
+>> Did you find that working on a particular part of the assignment gave >> you greater insight into some aspect of OS design?
+
+ >> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems? Conversely, did you >> find any of our guidance to be misleading?
+>> Do you have any suggestions for the TAs to more effectively assist >> students, either for future quarters or the remaining projects?
+>> Any other comments?
